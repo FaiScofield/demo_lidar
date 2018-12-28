@@ -1,3 +1,12 @@
+/*
+ * 根据视觉里程计topic("/cam_to_init")，和点云数据（"/sync_scan_cloud_filtered"），
+ * 将新点云和已有点云变换到当前相机坐标系下，实现图像与点云数据的对齐
+ *
+ * 数组voRx[]~voTz[]用于保存连续的相机位姿,depthCloud不断把之前的点云点变换到最近时刻的相机位姿,
+ * 当再有新的点云到来时,进入函数syncCloudHandler(),该函数先将该帧点云变换到最近的相机位姿下,然后
+ * 添加到depthCloud中;当相机位姿发生变化时,进入函数voDataHandler(),先将depthCloud变换到新的相机
+ * 位姿下,然后进行滤波,然后发布出去
+ */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -71,6 +80,8 @@ void voDataHandler(const nav_msgs::Odometry::ConstPtr& voData)
   tyRec = voData->pose.pose.position.y;
   tzRec = voData->pose.pose.position.z;
 
+  // 因为是把世界坐标系旋转到当前坐标系,所以roll,pitch,yaw应该取负值,而绕x轴和绕y轴的旋转角度在发布与接收时已经被
+  // 添加了负值,所以旋转矩阵没变,而绕z轴的旋转角没取负值,所以在旋转矩阵里要把绕z轴角度取负值
   double x1 = cos(yaw) * tx + sin(yaw) * tz;
   double y1 = ty;
   double z1 = -sin(yaw) * tx + cos(yaw) * tz;
@@ -83,8 +94,18 @@ void voDataHandler(const nav_msgs::Odometry::ConstPtr& voData)
   ty = -sin(roll) * x2 + cos(roll) * y2;
   tz = z2;
 
+  // voDataInd取值为0~29
   voDataInd = (voDataInd + 1) % keepVoDataNum;
   voDataTime[voDataInd] = time;
+  /*
+   * rx~ry存的是R_lc中的旋转量,旋转方向是z->x->y,参考坐标系是上一帧,所以也就是说上一帧按照R_lc=ry*rx*rz(旋转方向自右向左)的
+   * 顺序旋转可以得到当前帧的坐标,在visualOdometry.cpp中可以看到,transform[0]~[2]存储的其实是R_cl中的旋转角度,而vo的
+   * twist中的旋转角度存的是angleSum[0]~[2] -= transform[0]~[2],有一个取负值的操作,取负之后得到的就是R_lc中的旋转角,
+   * R_lc和R_cl的区别就是:
+   * R_lc=ry*rx*rz
+   * R_cl=-rz*-rx*-ry(旋转顺序从右往左看)
+   * tx~tz存的就是T_lc的位移量,当前坐标系相对于上一帧坐标系,在当前坐标系下表示的位移增量,
+   */
   voRx[voDataInd] = rx;
   voRy[voDataInd] = ry;
   voRz[voDataInd] = rz;
@@ -115,6 +136,12 @@ void voDataHandler(const nav_msgs::Odometry::ConstPtr& voData)
       y2 = cosrx * y1 + sinrx * z1;
       z2 = -sinrx * y1 + cosrx * z1;
 
+      /*
+       * tx~tz存的就是当前坐标系相对于上一帧坐标系,在当前坐标系下表示的位移增量,T_lc,因为是
+       * rx = voData->twist.twist.angular.x - rxRec;所以基准坐标系是上一帧,即rxRec.
+       * 所以上一帧的一个点P_l,通过P_c=R_cl*P_l+T_cl可以变换到当前坐标系,
+       * 并且R_cl=-rz*-rx*-ry  T_cl=-T_lc(即-tx,-ty,-tz),所以这里是减去tx,ty,tz
+       */
       point.x = cosrz * x2 + sinrz * y2 - tx;
       point.y = -sinrz * x2 + cosrz * y2 - ty;
       point.z = z2 - tz;
@@ -210,6 +237,7 @@ void syncCloudHandler(const sensor_msgs::PointCloud2ConstPtr& syncCloud2)
     }
   }
 
+  // 通过插值得到与点云对应的坐标系,这个坐标系下保存的rx2~rz2,tx2~tz2指的是点云对应的帧与voRegInd指向的帧之间的R,T关系
   double rx2 = voRx[voRegInd] * scale;
   double ry2 = voRy[voRegInd] * scale;
   double rz2 = voRz[voRegInd] * scale;
@@ -234,6 +262,7 @@ void syncCloudHandler(const sensor_msgs::PointCloud2ConstPtr& syncCloud2)
     point.z = syncCloud->points[i].z;
     point.intensity = timeLasted;
 
+    // 把插值得到的坐标系下的点转换到voRegInd指向的那一帧
     x1 = cosry2 * point.x - sinry2 * point.z;
     y1 = point.y;
     z1 = sinry2 * point.x + cosry2 * point.z;
@@ -246,6 +275,7 @@ void syncCloudHandler(const sensor_msgs::PointCloud2ConstPtr& syncCloud2)
     point.y = -sinrz2 * x2 + cosrz2 * y2 - ty2;
     point.z = z2 - tz2;
 
+    // 将点云一直变换到最新的一帧坐标系下
     if (voDataInd >= 0) {
       int voAftInd = (voRegInd + 1) % keepVoDataNum;
       while (voAftInd != (voDataInd + 1) % keepVoDataNum) {

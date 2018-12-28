@@ -65,10 +65,10 @@ ros::Publisher *imagePointsLastPubPointer;
 ros::Publisher *imageShowPubPointer;
 cv_bridge::CvImage bridge;
 
-void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData) 
+void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
 {
   timeLast = timeCur;
-  timeCur = imageData->header.stamp.toSec() - 0.1163;
+  timeCur = imageData->header.stamp.toSec() - 0.1163; // -0.1163 ?
 
   IplImage *imageTemp = imageLast;
   imageLast = imageCur;
@@ -79,10 +79,12 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
   }
 
   IplImage *t = cvCloneImage(imageCur);
+  // 去除图像畸变
   cvRemap(t, imageCur, mapx, mapy);
-  //cvEqualizeHist(imageCur, imageCur);
+  // cvEqualizeHist(imageCur, imageCur);
   cvReleaseImage(&t);
 
+  // 缩小一点可能角点检测速度比较快
   cvResize(imageLast, imageShow);
   cvCornerHarris(imageShow, harrisLast, 3);
 
@@ -103,15 +105,17 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
   int recordFeatureNum = totalFeatureNum;
   for (int i = 0; i < ySubregionNum; i++) {
     for (int j = 0; j < xSubregionNum; j++) {
-      int ind = xSubregionNum * i + j;
+      int ind = xSubregionNum * i + j;  // ind指向当前的subregion编号
       int numToFind = maxFeatureNumPerSubregion - subregionFeatureNum[ind];
 
       if (numToFind > 0) {
         int subregionLeft = xBoundary + (int)(subregionWidth * j);
         int subregionTop = yBoundary + (int)(subregionHeight * i);
+        // 将当前的subregion框选出来
         CvRect subregion = cvRect(subregionLeft, subregionTop, (int)subregionWidth, (int)subregionHeight);
         cvSetImageROI(imageLast, subregion);
 
+        // 在框选出来的subregion中寻找好的特征点
         cvGoodFeaturesToTrack(imageLast, imageEig, imageTmp, featuresLast + totalFeatureNum,
                               &numToFind, 0.1, 5.0, NULL, 3, 1, 0.04);
 
@@ -123,6 +127,7 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
           int xInd = (featuresLast[totalFeatureNum + k].x + 0.5) / showDSRate;
           int yInd = (featuresLast[totalFeatureNum + k].y + 0.5) / showDSRate;
 
+          // 查看检测的角点中是否有匹配到的合适的特征点
           if (((float*)(harrisLast->imageData + harrisLast->widthStep * yInd))[xInd] > 1e-7) {
             featuresLast[totalFeatureNum + numFound].x = featuresLast[totalFeatureNum + k].x;
             featuresLast[totalFeatureNum + numFound].y = featuresLast[totalFeatureNum + k].y;
@@ -140,9 +145,10 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
     }
   }
 
+  // 计算图像金字塔
   cvCalcOpticalFlowPyrLK(imageLast, imageCur, pyrLast, pyrCur,
-                         featuresLast, featuresCur, totalFeatureNum, cvSize(winSize, winSize), 
-                         3, featuresFound, featuresError, 
+                         featuresLast, featuresCur, totalFeatureNum, cvSize(winSize, winSize),
+                         3, featuresFound, featuresError,
                          cvTermCriteria(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 30, 0.01), 0);
 
   for (int i = 0; i < totalSubregionNum; i++) {
@@ -153,26 +159,35 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
   int featureCount = 0;
   double meanShiftX = 0, meanShiftY = 0;
   for (int i = 0; i < totalFeatureNum; i++) {
-    double trackDis = sqrt((featuresLast[i].x - featuresCur[i].x) 
+    double trackDis = sqrt((featuresLast[i].x - featuresCur[i].x)
                     * (featuresLast[i].x - featuresCur[i].x)
-                    + (featuresLast[i].y - featuresCur[i].y) 
+                    + (featuresLast[i].y - featuresCur[i].y)
                     * (featuresLast[i].y - featuresCur[i].y));
 
-    if (!(trackDis > maxTrackDis || featuresCur[i].x < xBoundary || 
-      featuresCur[i].x > imageWidth - xBoundary || featuresCur[i].y < yBoundary || 
+    if (!(trackDis > maxTrackDis || featuresCur[i].x < xBoundary ||
+      featuresCur[i].x > imageWidth - xBoundary || featuresCur[i].y < yBoundary ||
       featuresCur[i].y > imageHeight - yBoundary)) {
 
+      // 计算当前特征点是哪个subregion中检测到的，ind是subregion的编号
       int xInd = (int)((featuresLast[i].x - xBoundary) / subregionWidth);
       int yInd = (int)((featuresLast[i].y - yBoundary) / subregionHeight);
       int ind = xSubregionNum * yInd + xInd;
 
       if (subregionFeatureNum[ind] < maxFeatureNumPerSubregion) {
+        // 根据筛选准则将光流法匹配到的特征点进行筛选,这里featureCount是从0开始的，
+        // 所以featuresCur[]和featuresLast[]只保存了邻近图像的特征点，很久之前的没有保存
         featuresCur[featureCount].x = featuresCur[i].x;
         featuresCur[featureCount].y = featuresCur[i].y;
         featuresLast[featureCount].x = featuresLast[i].x;
         featuresLast[featureCount].y = featuresLast[i].y;
+        // 有些特征点被筛掉，所以这里featureCount不一定和i相等
         featuresInd[featureCount] = featuresInd[i];
 
+        /* 这一步将图像坐标系下的特征点[u,v]，变换到了相机坐标系下，即[u,v]->[X/Z,Y/Z,1],参考《14讲》式5.5
+         * 不过要注意这里加了个负号。相机坐标系默认是z轴向前，x轴向右，y轴向下，图像坐标系默认在图像的左上角，
+         * featuresCur[featureCount].x - kImage[2]先将图像坐标系从左上角还原到图像中心，然后加个负号，
+         * 即将默认相机坐标系的x轴负方向作为正方向，y轴同理。所以此时相机坐标系z轴向前，x轴向左，y轴向上
+         */
         point.u = -(featuresCur[featureCount].x - kImage[2]) / kImage[0];
         point.v = -(featuresCur[featureCount].y - kImage[5]) / kImage[4];
         point.ind = featuresInd[featureCount];
@@ -188,7 +203,7 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
         meanShiftY += fabs((featuresCur[featureCount].y - featuresLast[featureCount].y) / kImage[4]);
 
         featureCount++;
-        subregionFeatureNum[ind]++;
+        subregionFeatureNum[ind]++; // subregionFeatureNum是根据当前帧与上一帧的特征点匹配数目来计数的
       }
     }
   }
@@ -201,6 +216,7 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
   imagePointsLast2.header.stamp = ros::Time().fromSec(timeLast);
   imagePointsLastPubPointer->publish(imagePointsLast2);
 
+  // 隔两张图像才输出一副图像显示
   showCount = (showCount + 1) % (showSkipNum + 1);
   if (showCount == showSkipNum) {
     Mat imageShowMat(imageShow);
