@@ -42,6 +42,7 @@ void voDataHandler(const nav_msgs::Odometry::ConstPtr& voData)
 
   double rx, ry, rz;
   geometry_msgs::Quaternion geoQuat = voData->pose.pose.orientation;
+  // 下面做点云转换的时候rx和ry取了个负号，因此这里先将rx和ry取为原来的负值
   tf::Matrix3x3(tf::Quaternion(geoQuat.z, -geoQuat.x, -geoQuat.y, geoQuat.w)).getRPY(rz, rx, ry);
 
   double tx = voData->pose.pose.position.x;
@@ -68,6 +69,7 @@ void syncCloudHandler(const sensor_msgs::PointCloud2ConstPtr& syncCloud2)
   double time = syncCloud2->header.stamp.toSec();
 
   syncCloud->clear();
+  // ranslate point cloud into the frame that has the same direction with the original VLP coordinate
   pcl::fromROSMsg(*syncCloud2, *syncCloud);
 
   double scaleCur = 1;
