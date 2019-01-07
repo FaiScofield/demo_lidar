@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <ros/ros.h>
+#include <string>
 
 #include "cameraParameters.h"
 #include "pointDefinition.h"
@@ -9,82 +10,98 @@
 using namespace std;
 using namespace cv;
 
+//string path = "/media/vance/00077298000E1760/dataset/KITTI/2011_09_30/2011_09_30_drive_0027_sync/image_00/data";
+
 bool systemInited = false;
 double timeCur, timeLast;
 
+/// 操作对象 - 当前帧和上一帧的图像
 const int imagePixelNum = imageHeight * imageWidth;
 CvSize imgSize = cvSize(imageWidth, imageHeight);
-
 IplImage *imageCur = cvCreateImage(imgSize, IPL_DEPTH_8U, 1);
 IplImage *imageLast = cvCreateImage(imgSize, IPL_DEPTH_8U, 1);
+//Mat *imageCur = new Mat(imgSize, CV_8UC1);
+//Mat *imageLast = new Mat(imgSize, CV_8UC1);
 
-int showCount = 0;
-const int showSkipNum = 2;
-const int showDSRate = 2;
-CvSize showSize = cvSize(imageWidth / showDSRate, imageHeight / showDSRate);
-
+/// 可视化参数
+int showCount = 0;          //
+const int showSkipNum = 2;  // 可视化时要跳过的帧数
+const int showDSRate = 2;   // 可视化画面比例
+CvSize showSize = cvSize(imageWidth / showDSRate, imageHeight / showDSRate); // 以原图1/4大小可视化
 IplImage *imageShow = cvCreateImage(showSize, IPL_DEPTH_8U, 1);
 IplImage *harrisLast = cvCreateImage(showSize, IPL_DEPTH_32F, 1);
 
+/// 相机参数矩阵
 CvMat kMat = cvMat(3, 3, CV_64FC1, kImage);
 CvMat dMat = cvMat(4, 1, CV_64FC1, dImage);
 
 IplImage *mapx, *mapy;
+//Mat *mapx, *mapy;
 
-const int maxFeatureNumPerSubregion = 2;
-const int xSubregionNum = 12;
-const int ySubregionNum = 8;
-const int totalSubregionNum = xSubregionNum * ySubregionNum;
-const int MAXFEATURENUM = maxFeatureNumPerSubregion * totalSubregionNum;
+/// 区域划分
+const int maxFeatureNumPerSubregion = 2; // 每个子区域的最大特征数
+const int xSubregionNum = 12; // 宽度上的区域划分数
+const int ySubregionNum = 8;  // 高度上的区域划分数
+const int totalSubregionNum = xSubregionNum * ySubregionNum; // 总区域数
+const int MAXFEATURENUM = maxFeatureNumPerSubregion * totalSubregionNum; // 总特征数量不会超过的最大值
 
-const int xBoundary = 20;
-const int yBoundary = 20;
-const double subregionWidth = (double)(imageWidth - 2 * xBoundary) / (double)xSubregionNum;
-const double subregionHeight = (double)(imageHeight - 2 * yBoundary) / (double)ySubregionNum;
+const int xBoundary = 20; // 左右预留的边界像素量
+const int yBoundary = 20; // 上下预留的边界像素量
+const double subregionWidth = (double)(imageWidth - 2 * xBoundary) / (double)xSubregionNum; // 单个子区域的宽度
+const double subregionHeight = (double)(imageHeight - 2 * yBoundary) / (double)ySubregionNum; // 单个子区域的高度
 
 const double maxTrackDis = 100;
 const int winSize = 15;
 
-IplImage *imageEig, *imageTmp, *pyrCur, *pyrLast;
+/// 图像特征
+IplImage *imageEig, *imageTmp, *pyrCur, *pyrLast; // 图像金字塔
 
-CvPoint2D32f *featuresCur = new CvPoint2D32f[2 * MAXFEATURENUM];
+CvPoint2D32f *featuresCur = new CvPoint2D32f[2 * MAXFEATURENUM]; // 为何给2倍空间？
 CvPoint2D32f *featuresLast = new CvPoint2D32f[2 * MAXFEATURENUM];
 char featuresFound[2 * MAXFEATURENUM];
 float featuresError[2 * MAXFEATURENUM];
 
-int featuresIndFromStart = 0;
-int featuresInd[2 * MAXFEATURENUM] = {0};
+int featuresIndFromStart = 0; // 特征点的相对第一个点的索引
+int featuresInd[2 * MAXFEATURENUM] = {0}; // 所有特征点的相对索引
 
-int totalFeatureNum = 0;
-int subregionFeatureNum[2 * totalSubregionNum] = {0};
+int totalFeatureNum = 0; // 总特征点数
+int subregionFeatureNum[2 * totalSubregionNum] = {0}; // 每个子区域的特征点数，为何2倍？
 
+/// 转为深度图？pcl格式？
 pcl::PointCloud<ImagePoint>::Ptr imagePointsCur(new pcl::PointCloud<ImagePoint>());
 pcl::PointCloud<ImagePoint>::Ptr imagePointsLast(new pcl::PointCloud<ImagePoint>());
 
+/// ROS相关
 ros::Publisher *imagePointsLastPubPointer;
 ros::Publisher *imageShowPubPointer;
 cv_bridge::CvImage bridge;
 
+/// 图像的处理
+/// 1）提取fast角点 2）计算图像金字塔
 void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
 {
+
+  // 前帧数据变后帧，当前帧数据更新
   timeLast = timeCur;
-  timeCur = imageData->header.stamp.toSec() - 0.1163; // -0.1163 ?
+  timeCur = imageData->header.stamp.toSec() - 0.1163; // -0.1163 ? 是因为ROS消息提取的延迟而补偿？
 
   IplImage *imageTemp = imageLast;
   imageLast = imageCur;
   imageCur = imageTemp;
+
 
   for (int i = 0; i < imagePixelNum; i++) {
     imageCur->imageData[i] = (char)imageData->data[i];
   }
 
   IplImage *t = cvCloneImage(imageCur);
-  // 去除图像畸变
+
+  // 去除当前帧图像畸变
   cvRemap(t, imageCur, mapx, mapy);
-  // cvEqualizeHist(imageCur, imageCur);
+//  cvEqualizeHist(imageCur, imageCur); // 直方图均衡化
   cvReleaseImage(&t);
 
-  // 缩小一点可能角点检测速度比较快
+  // 将上一帧带有特征点的图像输出
   cvResize(imageLast, imageShow);
   cvCornerHarris(imageShow, harrisLast, 3);
 
@@ -99,9 +116,11 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
 
   if (!systemInited) {
     systemInited = true;
-    return;
+    return; // 第一帧跳过，第二帧再往下
   }
 
+  // 对每个子区域进行特征提取，分区域有助于特征点均匀分布
+  // 所有区域特征提取完毕后，特征点存在featuresLast数组内，对应的索引在featuresInd数组内
   int recordFeatureNum = totalFeatureNum;
   for (int i = 0; i < ySubregionNum; i++) {
     for (int j = 0; j < xSubregionNum; j++) {
@@ -111,23 +130,24 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
       if (numToFind > 0) {
         int subregionLeft = xBoundary + (int)(subregionWidth * j);
         int subregionTop = yBoundary + (int)(subregionHeight * i);
-        // 将当前的subregion框选出来
         CvRect subregion = cvRect(subregionLeft, subregionTop, (int)subregionWidth, (int)subregionHeight);
-        cvSetImageROI(imageLast, subregion);
+        cvSetImageROI(imageLast, subregion); // 将当前的subregion设置为ROI区域
 
-        // 在框选出来的subregion中寻找好的特征点
+        // 在ROI中寻找好的特征点,存在featuresLast的数组内（有2倍MAXFEATURENUM的空间）
         cvGoodFeaturesToTrack(imageLast, imageEig, imageTmp, featuresLast + totalFeatureNum,
-                              &numToFind, 0.1, 5.0, NULL, 3, 1, 0.04);
+                              &numToFind, 0.1, 5.0, nullptr, 3, 1, 0.04);
 
         int numFound = 0;
         for(int k = 0; k < numToFind; k++) {
+          // 特征点的横纵坐标是相对于子区域左上角的，这里更新为绝对坐标
           featuresLast[totalFeatureNum + k].x += subregionLeft;
           featuresLast[totalFeatureNum + k].y += subregionTop;
 
+          // 特征点在可视化图像上的坐标
           int xInd = (featuresLast[totalFeatureNum + k].x + 0.5) / showDSRate;
           int yInd = (featuresLast[totalFeatureNum + k].y + 0.5) / showDSRate;
 
-          // 查看检测的角点中是否有匹配到的合适的特征点
+          // 筛选特征点
           if (((float*)(harrisLast->imageData + harrisLast->widthStep * yInd))[xInd] > 1e-7) {
             featuresLast[totalFeatureNum + numFound].x = featuresLast[totalFeatureNum + k].x;
             featuresLast[totalFeatureNum + numFound].y = featuresLast[totalFeatureNum + k].y;
@@ -140,7 +160,7 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
         totalFeatureNum += numFound;
         subregionFeatureNum[ind] += numFound;
 
-        cvResetImageROI(imageLast);
+        cvResetImageROI(imageLast); // 取消ROI区域
       }
     }
   }
@@ -213,28 +233,35 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
 
   sensor_msgs::PointCloud2 imagePointsLast2;
   pcl::toROSMsg(*imagePointsLast, imagePointsLast2);
+  imagePointsLast2.header.frame_id = "camera";
   imagePointsLast2.header.stamp = ros::Time().fromSec(timeLast);
   imagePointsLastPubPointer->publish(imagePointsLast2);
 
-  // 隔两张图像才输出一副图像显示
+  // 每隔两帧图像才输出一副图像显示
   showCount = (showCount + 1) % (showSkipNum + 1);
   if (showCount == showSkipNum) {
-    Mat imageShowMat(imageShow);
+    Mat imageShowMat = cvarrToMat(imageShow);
     bridge.image = imageShowMat;
     bridge.encoding = "mono8";
+    bridge.header.stamp = ros::Time().fromSec(timeLast);
+    bridge.header.frame_id = "camera";
     sensor_msgs::Image::Ptr imageShowPointer = bridge.toImageMsg();
     imageShowPubPointer->publish(imageShowPointer);
+    cout << "pub a msg.\n";
   }
 }
+
 
 int main(int argc, char** argv)
 {
   ros::init(argc, argv, "featureTracking");
   ros::NodeHandle nh;
 
+  // 计算图像去畸变的投影变换，存在mapx和mapy里，在imageDataHandler()函数里进行去畸变处理
   mapx = cvCreateImage(imgSize, IPL_DEPTH_32F, 1);
   mapy = cvCreateImage(imgSize, IPL_DEPTH_32F, 1);
   cvInitUndistortMap(&kMat, &dMat, mapx, mapy);
+
 
   CvSize subregionSize = cvSize((int)subregionWidth, (int)subregionHeight);
   imageEig = cvCreateImage(subregionSize, IPL_DEPTH_32F, 1);
@@ -244,7 +271,9 @@ int main(int argc, char** argv)
   pyrCur = cvCreateImage(pyrSize, IPL_DEPTH_32F, 1);
   pyrLast = cvCreateImage(pyrSize, IPL_DEPTH_32F, 1);
 
-  ros::Subscriber imageDataSub = nh.subscribe<sensor_msgs::Image>("/image/raw", 1, imageDataHandler);
+//  ros::Subscriber imageDataSub = nh.subscribe<sensor_msgs::Image>("/image/raw", 1, imageDataHandler);
+  ros::Subscriber imageDataSub = nh.subscribe<sensor_msgs::Image>("/kitti/camera_gray_left/image_raw", 1, imageDataHandler);
+
 
   ros::Publisher imagePointsLastPub = nh.advertise<sensor_msgs::PointCloud2> ("/image_points_last", 5);
   imagePointsLastPubPointer = &imagePointsLastPub;
