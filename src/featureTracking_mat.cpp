@@ -39,15 +39,15 @@ private:
     /// const
 //    const int imagePixelNum = imageHeight * imageWidth;
 
-    const int maxFeatureNumPerSubregion = 20; // 每个子区域的最大特征数
-    const int xSubregionNum = 8; // 宽度上的区域划分数, for kitti
-    const int ySubregionNum = 3; // 高度上的区域划分数
-    const int totalSubregionNum = xSubregionNum * ySubregionNum; // 总区域数
+    const size_t maxFeatureNumPerSubregion = 20; // 每个子区域的最大特征数
+    const size_t xSubregionNum = 8; // 宽度上的区域划分数, for kitti
+    const size_t ySubregionNum = 3; // 高度上的区域划分数
+    const size_t totalSubregionNum = xSubregionNum * ySubregionNum; // 总区域数
 //    const int MAXFEATURENUM = maxFeatureNumPerSubregion * totalSubregionNum; // 总特征数量不会超过的最大值
     const int xBoundary = 20, yBoundary = 20; // 左右和上下预留的边界像素量
-    const double subregionWidth = (double)(imageWidth - 2 * xBoundary) / (double)xSubregionNum; // 单个子区域的宽度
-    const double subregionHeight = (double)(imageHeight - 2 * yBoundary) / (double)ySubregionNum; // 单个子区域的高度
-    const double maxTrackDis = 100;  // 光流最大距离
+    const double subregionWidth = (imageWidth - 2 * xBoundary) / static_cast<double>(xSubregionNum); // 单个子区域的宽度
+    const double subregionHeight = (imageHeight - 2 * yBoundary) / static_cast<double>(ySubregionNum); // 单个子区域的高度
+    const double maxTrackDis = 100.0;  // 光流最大距离
 
     const int showSkipNum = 2;  // 可视化时要跳过的帧数
     const int showDSRate = 1;   // 可视化画面比例
@@ -63,10 +63,10 @@ private:
     vector<unsigned char> featuresStatus; // 光流追踪到的特征点的标志
     vector<float> featuresError;    // 光流追踪到的特征点的误差
 
-    int featuresIndFromStart; // 特征点的相对第一个点的索引
-    int totalFeatureNum; // 总特征点数
-    vector<int> featuresInd; // 所有特征点的相对索引
-    vector<int> subregionFeatureNum; // 每个子区域的特征点数
+    size_t featuresIndFromStart; // 特征点的相对第一个点的索引
+    size_t totalFeatureNum; // 总特征点数
+    vector<size_t> featuresInd; // 所有特征点的相对索引
+    vector<size_t> subregionFeatureNum; // 每个子区域的特征点数
 
 public:
     FeatureTracking() : nh("~") {
@@ -99,7 +99,7 @@ public:
 
         featuresIndFromStart = 0; // 特征点的相对第一个点的索引
         totalFeatureNum = 0; // 一帧图像的总特征点数
-        subregionFeatureNum.resize(totalSubregionNum, 0); // 每个子区域的特征点数
+        subregionFeatureNum.resize(static_cast<size_t>(totalSubregionNum), 0); // 每个子区域的特征点数
 
         // 计算图像去畸变的投影变换，存在mapx和mapy里，在imageDataHandler()函数里进行去畸变处理
         Size imageSize = Size(imageWidth, imageHeight);
@@ -169,14 +169,14 @@ public:
         }
 
         subregionFeatureNum.clear();
-        subregionFeatureNum.resize(totalSubregionNum, 0); // 待更新成匹配成功的特征点数
+        subregionFeatureNum.resize(static_cast<size_t>(totalSubregionNum), 0); // 待更新成匹配成功的特征点数
 
 
         // 特征点分区域进行匹配并求相机坐标系下的坐标
         ImagePoint point;
-        int featureCount = 0;
-        for (int i = 0; i < totalFeatureNum; ++i) {
-            double trackDis_square = (featuresLast[i].x - featuresCur[i].x) * (featuresLast[i].x - featuresCur[i].x)
+        size_t featureCount = 0;
+        for (size_t i = 0; i < totalFeatureNum; ++i) {
+            float trackDis_square = (featuresLast[i].x - featuresCur[i].x) * (featuresLast[i].x - featuresCur[i].x)
                 + (featuresLast[i].y - featuresCur[i].y) * (featuresLast[i].y - featuresCur[i].y);
 
             if (featuresStatus[i] && !(trackDis_square > maxTrackDis * maxTrackDis ||
@@ -184,9 +184,9 @@ public:
                 featuresCur[i].y < yBoundary || featuresCur[i].y > imageHeight - yBoundary)) {
 
                 // 计算当前特征点是哪个subregion中检测到的，ind是subregion的编号
-                int xInd = (int)((featuresLast[i].x - xBoundary) / subregionWidth);
-                int yInd = (int)((featuresLast[i].y - yBoundary) / subregionHeight);
-                int ind = xSubregionNum * yInd + xInd;
+                size_t xInd = static_cast<size_t>((featuresLast[i].x - xBoundary) / subregionWidth);
+                size_t yInd = static_cast<size_t>((featuresLast[i].y - yBoundary) / subregionHeight);
+                size_t ind = xSubregionNum * yInd + xInd;
 
                 if (subregionFeatureNum[ind] < maxFeatureNumPerSubregion) {
                     // 根据筛选准则将光流法匹配到的特征点进行筛选,这里featureCount是从0开始的，
@@ -240,39 +240,39 @@ public:
     void computeFeatures(const Mat* image, vector<Point2f>& features) {
         featuresIndFromStart = totalFeatureNum = 0;
         subregionFeatureNum.clear();
-        subregionFeatureNum.resize(totalSubregionNum, 0);
+        subregionFeatureNum.resize(static_cast<size_t>(totalSubregionNum), 0);
         if (!featuresInd.empty()) featuresInd.clear();
         if (!features.empty())    features.clear();
 
         // 对每个子区域进行特征提取，分区域有助于特征点均匀分布
         // 所有区域特征提取完毕后，特征点存在featuresLast数组内，对应的索引在featuresInd数组内
         vector<Point2f> featuresSub; // 存放图像某个子区域内检测到的特征点
-        for (int i = 0; i < ySubregionNum; i++) {
-            for (int j = 0; j < xSubregionNum; j++) {
+        for (size_t i = 0; i < ySubregionNum; i++) {
+            for (size_t j = 0; j < xSubregionNum; j++) {
                 if (!featuresSub.empty()) featuresSub.clear();
 
-                int ind = xSubregionNum * i + j;  // ind指向当前的subregion编号
-                int numToFind = maxFeatureNumPerSubregion/* - subregionFeatureNum[ind]*/;
+                size_t ind = xSubregionNum * i + j;  // ind指向当前的subregion编号
+                size_t numToFind = maxFeatureNumPerSubregion/* - subregionFeatureNum[ind]*/;
 
                 if (numToFind > maxFeatureNumPerSubregion / 5.0) {
-                    int subregionLeft = xBoundary + (int)(subregionWidth * j);
-                    int subregionTop = yBoundary + (int)(subregionHeight * i);
-                    Rect subregion = Rect(subregionLeft, subregionTop, (int)subregionWidth, (int)subregionHeight);
+                    int subregionLeft = xBoundary + static_cast<int>(subregionWidth * j);
+                    int subregionTop = yBoundary + static_cast<int>(subregionHeight * i);
+                    Rect subregion = Rect(subregionLeft, subregionTop, static_cast<int>(subregionWidth), static_cast<int>(subregionHeight));
                     Mat mask = Mat::zeros(imgSize, CV_8UC1);
                     mask(subregion).setTo(255); // 将当前的subregion设置为图像的掩模(ROI)
 
                     // 在ROI中寻找好的特征点,存在featuresSub内
                     goodFeaturesToTrack(*image, featuresSub, numToFind, 0.1, 10.0, mask, 4, 1, 0.04);
 
-                    int numFound = 0;
-                    for(int k = 0; k < featuresSub.size(); k++) {
+                    size_t numFound = 0;
+                    for(size_t k = 0; k < featuresSub.size(); k++) {
                         // 特征点的横纵坐标是相对于子区域左上角的，这里更新为绝对坐标
                         featuresSub[k].x += subregionLeft;
                         featuresSub[k].y += subregionTop;
 
                         // 特征点在可视化图像上的坐标
-                        int xInd = (featuresSub[k].x/* + 0.5*/) / showDSRate;
-                        int yInd = (featuresSub[k].y/* + 0.5*/) / showDSRate;
+                        int xInd = static_cast<int>((featuresSub[k].x/* + 0.5*/) / showDSRate);
+                        int yInd = static_cast<int>((featuresSub[k].y/* + 0.5*/) / showDSRate);
 
                         // 筛选特征点
                         if (xInd >= 0 && xInd < imageWidth &&
@@ -322,8 +322,8 @@ public:
         cout << "pub a image msg.\n";
 
         // test
-        imshow("show", imageShow);
-        waitKey(100);
+//        imshow("show", imageShow);
+//        waitKey(100);
     }
 
     /// 输出参数信息
@@ -331,7 +331,7 @@ public:
         printf("--> Node name: FeatureTracking\n");
         printf("  -> Image size parameter: %d x %d\n", imageWidth, imageHeight);
         printf("  -> Sub regin size: %4f x %4f\n", subregionWidth, subregionHeight);
-        printf("  -> Sub regin number: %d x %d = %d\n", xSubregionNum, ySubregionNum, totalSubregionNum);
+        printf("  -> Sub regin number: %u x %u = %u\n", xSubregionNum, ySubregionNum, totalSubregionNum);
     }
 };
 

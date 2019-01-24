@@ -75,3 +75,7 @@ target_link_libraries(demo_processDepthmap ${catkin_LIBRARIES} ${OpenCV_LIBS} ${
 target_link_libraries(demo_transformMaintenance ${catkin_LIBRARIES} ${OpenCV_LIBS} ${PCL_LIBRARIES})
 target_link_libraries(demo_registerPointCloud ${catkin_LIBRARIES})
 target_link_libraries(demo_imageConvert ${catkin_LIBRARIES} ${OpenCV_LIBS})
+
+# test
+add_executable(test_fast src/test_fast.cpp)
+target_link_libraries(test_fast ${OpenCV_LIBS} ${PCL_LIBRARIES} ${fast_LIBRARIES})

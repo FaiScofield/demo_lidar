@@ -10,7 +10,6 @@
 using namespace std;
 using namespace cv;
 
-//string path = "/media/vance/00077298000E1760/dataset/KITTI/2011_09_30/2011_09_30_drive_0027_sync/image_00/data";
 
 bool systemInited = false;
 double timeCur, timeLast;
@@ -24,7 +23,7 @@ IplImage *imageLast = cvCreateImage(imgSize, IPL_DEPTH_8U, 1);
 //Mat *imageLast = new Mat(imgSize, CV_8UC1);
 
 /// 可视化参数
-int showCount = 0;          //
+int showCount = 0;
 const int showSkipNum = 2;  // 可视化时要跳过的帧数
 const int showDSRate = 2;   // 可视化画面比例
 CvSize showSize = cvSize(imageWidth / showDSRate, imageHeight / showDSRate); // 以原图1/4大小可视化
@@ -36,7 +35,6 @@ CvMat kMat = cvMat(3, 3, CV_64FC1, kImage);
 CvMat dMat = cvMat(4, 1, CV_64FC1, dImage);
 
 IplImage *mapx, *mapy;
-//Mat *mapx, *mapy;
 
 /// 区域划分
 const int maxFeatureNumPerSubregion = 2; // 每个子区域的最大特征数
@@ -80,7 +78,6 @@ cv_bridge::CvImage bridge;
 /// 1）提取fast角点 2）计算图像金字塔
 void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
 {
-
   // 前帧数据变后帧，当前帧数据更新
   timeLast = timeCur;
   timeCur = imageData->header.stamp.toSec() - 0.1163; // -0.1163 ? 是因为ROS消息提取的延迟而补偿？

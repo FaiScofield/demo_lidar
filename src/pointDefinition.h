@@ -12,7 +12,7 @@
 
 struct ImagePoint {
      float u, v;
-     int ind;
+     size_t ind;
 };
 
 POINT_CLOUD_REGISTER_POINT_STRUCT (ImagePoint,
@@ -24,7 +24,7 @@ struct DepthPoint {
      float u, v;
      float depth;
      int label;
-     int ind;
+     size_t ind;
 };
 
 POINT_CLOUD_REGISTER_POINT_STRUCT (DepthPoint,

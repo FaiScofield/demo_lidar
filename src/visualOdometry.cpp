@@ -125,6 +125,7 @@ void diffRotation(double cx, double cy, double cz, double lx, double ly, double 
   oz = atan2(srzcrx / cos(ox), crzcrx / cos(ox));
 }
 
+/// 图像点的处理
 void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
 {
   imagePointsLastTime = imagePointsCurTime;
@@ -134,7 +135,7 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
   imuPitchLast = imuPitchCur;
   imuYawLast = imuYawCur;
 
-  // transform用于记录帧与帧之间的转移矩阵，transformSum记录当前帧与初始帧的转移矩阵,
+  // transform用于记录帧与帧之间的变换矩阵，transformSum记录当前帧与初始帧的变换矩阵,
   double transform[6] = {0};
   if (imuPointerLast >= 0) {
     while (imuPointerFront != imuPointerLast) {
@@ -578,7 +579,7 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
         break;
       }
 
-      // ROS_INFO ("iter: %d, deltaR: %f, deltaT: %f", iterCount, deltaR, deltaT);
+      ROS_INFO ("iter: %d, deltaR: %f, deltaT: %f", iterCount, deltaR, deltaT);
     }
   }
 
@@ -815,6 +816,7 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
   imagePointsProjPubPointer->publish(imagePointsProj2);
 }
 
+/// 点云投影到平面上
 void depthCloudHandler(const sensor_msgs::PointCloud2ConstPtr& depthCloud2)
 {
   depthCloudTime = depthCloud2->header.stamp.toSec();
@@ -836,6 +838,7 @@ void depthCloudHandler(const sensor_msgs::PointCloud2ConstPtr& depthCloud2)
   }
 }
 
+/// 提取imu数据
 void imuDataHandler(const sensor_msgs::Imu::ConstPtr& imuData)
 {
   double roll, pitch, yaw;
@@ -851,6 +854,7 @@ void imuDataHandler(const sensor_msgs::Imu::ConstPtr& imuData)
   imuYaw[imuPointerLast] = yaw;
 }
 
+/// 将空间特征点投影到显示图像上再发布
 void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
 {
   cv_bridge::CvImagePtr bridge = cv_bridge::toCvCopy(imageData, "bgr8");
